@@ -319,7 +319,8 @@ class Reporter:
             f" └ Win Rate: {report['win_rate']:.1f}%\n\n"
             f"⛽ <b>RESERVA DE GASOLINA (BNB):</b>\n"
             f" ├ BNB Disponible: {report['bnb']:.6f}\n"
-            f" └ Días de Reserva: ~{report.get('fee_reserve_days', 5)}\n\n"
+            f" ├ Meta de Reserva: {report.get('fee_reserve_days', 5)} días\n"
+            f" └ Autonomía Real: ~{report.get('actual_runway_days', 99.0):.1f} días\n\n"
             f"⚙️ <b>ESTADO DEL SISTEMA:</b>\n"
             f" ├ Modo Actual: {report['mode']}\n"
             f" ├ Risk Multiplier: x{report['risk_mult']:.2f}\n"
@@ -1868,16 +1869,22 @@ class OmegaEvolutionary:
         fees_to_invest_usdt = min(missing_fee_reserve, max_alloc_from_profit)
         fees_to_invest_bnb = fees_to_invest_usdt / bnb_price if bnb_price > 0 else 0.0
 
+        # Calcular autonomía real
+        actual_runway_days = 999.0
+        if fee_per_trade_usdt > 0 and expected_trades_per_day > 0:
+            actual_runway_days = current_fee_reserve / (fee_per_trade_usdt * expected_trades_per_day)
+
         result.update({
-            "pnl_usdt": pnl_usdt,
-            "fees_today_usdt": fees_today_usdt,
-            "fees_target_reserve_usdt": target_fee_reserve,
-            "fees_current_reserve_usdt": current_fee_reserve,
-            "fees_to_invest_usdt": fees_to_invest_usdt,
-            "fees_to_invest_bnb": fees_to_invest_bnb,
-            "avg_trade_usdt": avg_trade_usdt,
-            "trades_exits": len(rows)
-        })
+                "pnl_usdt": pnl_usdt,
+                "fees_today_usdt": fees_today_usdt,
+                "fees_target_reserve_usdt": target_fee_reserve,
+                "fees_current_reserve_usdt": current_fee_reserve,
+                "fees_to_invest_usdt": fees_to_invest_usdt,
+                "fees_to_invest_bnb": fees_to_invest_bnb,
+                "avg_trade_usdt": avg_trade_usdt,
+                "trades_exits": len(rows),
+                "actual_runway_days": actual_runway_days
+            })
         return result
 
     # ==========================================================
