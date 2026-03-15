@@ -328,6 +328,17 @@ class Reporter:
         Reporter.send(msg, is_critical=True)
 
     @staticmethod
+    def mode_change(old_mode, new_mode, capital, symbols_count):
+            msg = (
+                f"🔄 <b>CAMBIO DE MODO OPERATIVO</b>\n\n"
+                f"📈 <b>Capital Actual:</b> ${capital:.2f}\n"
+                f"⚙️ <b>Transición:</b> {old_mode} ➡️ {new_mode}\n"
+                f"📊 <b>Pares Habilitados:</b> {symbols_count}\n\n"
+                f"<i>El motor ha reajustado los límites de exposición al riesgo.</i>"
+            )
+            Reporter.send(msg, is_critical=True)
+
+    @staticmethod
     def emergency_stop(pnl, limit, scope="daily"):
         scope_txt = "EQUITY GLOBAL" if scope == "equity" else "DÍA ACTUAL"
         msg = (
@@ -1972,7 +1983,7 @@ class OmegaEvolutionary:
     # MAIN LOOP
     # ==========================================================
     def run(self):
-        ERROR_LOGGER.error("BOT STARTED v3.2 PRO ACCOUNTING")
+        ERROR_LOGGER.error("BOT STARTED v4.0 PRO ACCOUNTING")
 
         while True:
             try:
