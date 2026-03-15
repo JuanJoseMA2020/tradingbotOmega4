@@ -1114,83 +1114,55 @@ class OmegaEvolutionary:
 
         return edge, bucket, btc
 
-    def _position_fraction_from_edge(self, edge, bucket):
-        if bucket == "LOW":
-            base = 0.20 + (edge / 4.8) * 0.10
-        elif bucket == "MEDIUM":
-            base = 0.40 + ((edge - 4.8) / (7.2 - 4.8)) * 0.20
-        else:
-            base = 0.70 + ((edge - 7.2) / (10.0 - 7.2)) * 0.20
+    def _position_fraction_from_edge(self, edge, bucket, regime, metrics):
+            if bucket == "LOW":
+                base = 0.20 + (edge / 4.8) * 0.10
+            elif bucket == "MEDIUM":
+                base = 0.40 + ((edge - 4.8) / (7.2 - 4.8)) * 0.20
+            else:
+                base = 0.70 + ((edge - 7.2) / (10.0 - 7.2)) * 0.20
 
-        frac = float(base * self.risk_multiplier)
-        frac = float(np.clip(frac, 0.20, 0.90))
+            # Soft-Scaling: Reducir posición a la mitad si el mercado está lateral
+            if regime == "LATERAL":
+                base *= 0.50
 
-        if self.loss_streak >= 2:
-            frac *= 0.50
-        if self.win_streak >= 3 and self.loss_streak == 0:
-            frac *= 1.25
+            frac = float(base * self.risk_multiplier)
+            frac = float(np.clip(frac, 0.10, 0.90)) # Permitimos bajar hasta el 10% del capital
 
-        return float(np.clip(frac, 0.20, 0.90))
+            if self.loss_streak >= 2:
+                frac *= 0.50
+            if self.win_streak >= 3 and self.loss_streak == 0:
+                frac *= 1.25
+
+            return float(np.clip(frac, 0.10, 0.90))
 
     # ==========================================================
     # TP DYNAMIC: Heuristic + rolling stats
     # ==========================================================
-    def _refresh_tp_stats_cache(self):
-        now = time.time()
-        if now - self._tp_stats_cache["t"] < TP_STATS_CACHE_TTL:
-            return
-        data = {}
-        try:
-            with sqlite3.connect(DB_PATH) as conn:
-                for sym in SYMBOLS_EXPANSION:
-                    rows = conn.execute(
-                        "SELECT net FROM trades WHERE action='exit' AND symbol=? ORDER BY ts DESC LIMIT ?",
-                        (sym, TP_STATS_LOOKBACK)
-                    ).fetchall()
-                    nets = [float(r[0]) for r in rows if r[0] is not None]
-                    wins = [n for n in nets if n > 0]
-                    if len(wins) >= TP_STATS_MIN_EXITS:
-                        p50 = float(np.percentile(wins, 50))
-                        p75 = float(np.percentile(wins, 75))
-                        target = max(1.10, min(4.20, 0.85 * p75 + 0.15 * p50))
-                        data[sym] = {"tp_target": target, "wins": len(wins), "exits": len(nets)}
-        except Exception as e:
-            ERROR_LOGGER.error(f"TP stats cache error: {str(e)}")
-        self._tp_stats_cache = {"t": now, "data": data}
+    def _tp_sl_from_atr(self, atr_pct, bucket):
+            # Multiplicadores base sobre la volatilidad real
+            ATR_SL_MULTIPLIER = 1.8
+            ATR_TP_MULTIPLIER = 2.5
 
-    def _tp_from_edge(self, sym, bucket, metrics, ml_pred):
-        m = float(metrics['momentum'])
-        v = float(metrics['volatility'])
+            base_sl = -abs(atr_pct * ATR_SL_MULTIPLIER)
+            base_tp = abs(atr_pct * ATR_TP_MULTIPLIER)
 
-        if bucket == "LOW":
-            tp = 1.20 if (m < 0.6) else 1.40
-            max_ext = 1
-        elif bucket == "MEDIUM":
-            tp = 2.00
-            if m > 1.0 and v < 2.6:
-                tp = 2.20
-            elif m < 0.4:
-                tp = 1.80
-            max_ext = 2
-        else:
-            tp = 3.10
-            if m > 1.3 and v < 2.6:
-                tp = 3.60
-            elif v > 3.0:
-                tp = 2.90
-            max_ext = 3
+            # Ajuste por Edge
+            if bucket == "HIGH":
+                base_sl *= 0.85 # SL más ajustado (menos riesgo) si tenemos alta confianza
+                base_tp *= 1.20 # TP más ambicioso
+                max_ext = 3
+            elif bucket == "MEDIUM":
+                max_ext = 2
+            else:
+                base_tp *= 0.80 # Salir rápido si el edge es bajo
+                max_ext = 1
 
-        self._refresh_tp_stats_cache()
-        st = self._tp_stats_cache["data"].get(sym)
-        if st:
-            tp = 0.60 * float(st["tp_target"]) + 0.40 * tp
-
-        if self.ml_phase != "OBSERVATION":
-            adj = float(np.clip(ml_pred, -0.6, 1.2))
-            tp += float(np.clip(adj * 0.12, -0.20, 0.25))
-
-        tp = float(np.clip(tp, 1.10, 4.20))
-        return tp, max_ext
+            # Limites sanos absolutos para evitar excesos
+            sl = float(np.clip(base_sl, -3.5, -0.6))
+            tp = float(np.clip(base_tp, 1.0, 5.0))
+            
+            return tp, sl, max_ext
 
     # ==========================================================
     # NO-TRADE ZONES (hard vs soft)
@@ -1552,7 +1524,8 @@ class OmegaEvolutionary:
         if edge_bucket == "LOW" and edge_score < 4.2:
             return
 
-        pos_fraction = self._position_fraction_from_edge(edge_score, edge_bucket)
+# Llamada actualizada con regime y metrics para Soft-Scaling
+        pos_fraction = self._position_fraction_from_edge(edge_score, edge_bucket, regime, metrics)
 
         usdt_free = self._get_usdt_free()
         usdt_allocatable = max(0.0, usdt_free * 0.98)
@@ -1568,8 +1541,8 @@ class OmegaEvolutionary:
         if not self._min_notional_ok(sym, usdt_to_use):
             return
 
-        tp_base, max_ext = self._tp_from_edge(sym, edge_bucket, metrics, ml_pred)
-        sl_base = float(params['sl_base'])
+        # Nueva lógica de TP y SL basados en ATR
+        tp_base, sl_base, max_ext = self._tp_sl_from_atr(metrics['atr_pct'], edge_bucket)
 
         try:
             order = self._market_buy(sym, usdt_to_use)
