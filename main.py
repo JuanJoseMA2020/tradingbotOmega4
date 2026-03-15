@@ -190,237 +190,196 @@ SYMBOL_PROFILES = {
 # ==========================================================
 # TELEGRAM REPORTER (anti-spam)
 # ==========================================================
+# ==========================================================
+# TELEGRAM REPORTER (SALA DE CONTROL)
+# ==========================================================
 class Reporter:
 
     last_alert_time = 0
     last_bnb_alert_time = 0
     _no_trade_last = {}
 
-    # ==========================================================
-    # CORE SEND
-    # ==========================================================
     @staticmethod
     def send(msg, is_critical=False):
-
-        if not TG_TOKEN or not TG_CHAT_ID:
-            return
-
+        if not TG_TOKEN or not TG_CHAT_ID: return
         now = time.time()
-
-        if not is_critical and (now - Reporter.last_alert_time < ALERT_FREQUENCY_SEC):
-            return
-
+        if not is_critical and (now - Reporter.last_alert_time < ALERT_FREQUENCY_SEC): return
         try:
             requests.post(
                 f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                json={
-                    "chat_id": TG_CHAT_ID,
-                    "text": msg,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True
-                },
+                json={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True},
                 timeout=8
             )
             Reporter.last_alert_time = now
-        except:
-            pass
+        except: pass
 
-    # ==========================================================
-    # BOT ONLINE
-    # ==========================================================
     @staticmethod
     def online(mode, symbols_count, capital, bnb, risk_mult=1.0):
-        Reporter.send(
-            f"🦾 <b>OMEGA Ω — EDGE ENGINE v3.2</b>\n\n"
-            f"💰 Capital operativo: <b>${capital:.2f}</b>\n"
-            f"💎 BNB reserva: <b>{bnb:.6f}</b>\n"
-            f"⚙️ Modo: <b>{mode}</b>\n"
-            f"📊 Símbolos activos: <b>{symbols_count}</b>\n"
-            f"🛡️ Risk Mult: <b>x{risk_mult:.2f}</b>\n\n"
-            f"Sistema sincronizado",
-            is_critical=True
+        msg = (
+            f"🟢 <b>SISTEMA OMEGA INICIADO (v4.0)</b>\n\n"
+            f"💰 <b>Capital Operativo:</b> ${capital:.2f} USDT\n"
+            f"⛽ <b>Reserva BNB:</b> {bnb:.6f}\n"
+            f"⚙️ <b>Modo Actual:</b> {mode}\n"
+            f"📊 <b>Pares Activos:</b> {symbols_count}\n"
+            f"🛡️ <b>Risk Multiplier:</b> x{risk_mult:.2f}\n\n"
+            f"<i>Escaneo de mercado en curso...</i>"
         )
+        Reporter.send(msg, is_critical=True)
 
-    # ==========================================================
-    # ENTRY
-    # ==========================================================
     @staticmethod
-    def entry(symbol, entry, strategy_score, strategies, usdt,
-              tp, sl, order_id, ml_pred, regime,
-              edge_score, edge_bucket, pos_fraction, risk_mult):
-
+    def entry(symbol, entry, strategy_score, strategies, usdt, tp, sl, order_id, ml_pred, regime, edge_score, edge_bucket, pos_fraction, risk_mult):
         sl_price = entry * (1 + sl/100)
         tp_price = entry * (1 + tp/100)
         breakeven_price = entry * (1 + FEE_ROUNDTRIP)
 
-        strat_list = "\n".join([f"• {s}" for s in strategies[:5]])
+        # Cálculos predictivos de PnL en USDT
+        qty = usdt / entry
+        potential_win_usdt = (tp_price - entry) * qty - (FEE_ROUNDTRIP * usdt)
+        potential_loss_usdt = (entry - sl_price) * qty + (FEE_ROUNDTRIP * usdt)
 
-        Reporter.send(
-            f"🚀 <b>ENTRADA</b>\n\n"
-            f"<b>{symbol}</b>\n"
-            f"Entrada: <b>{entry:.6f}</b>\n"
-            f"Capital: ${usdt:.2f}\n\n"
-            f"Edge: <b>{edge_score:.1f}/10</b> ({edge_bucket})\n"
-            f"Size: {pos_fraction*100:.0f}% | Risk x{risk_mult:.2f}\n\n"
-            f"🎯 TP: <b>{tp_price:.6f}</b>\n"
-            f"🛑 SL: <b>{sl_price:.6f}</b>\n"
-            f"⚖️ Breakeven: <b>{breakeven_price:.6f}</b>\n\n"
-            f"📈 Estrategias:\n{strat_list}\n\n"
-            f"🆔 {order_id}",
-            is_critical=True
+        strat_list = "\n".join([f" ├ {s}" for s in strategies[:4]])
+
+        msg = (
+            f"🚀 <b>NUEVA ENTRADA | {symbol}</b>\n\n"
+            f"💵 <b>Capital Invertido:</b> ${usdt:.2f} (Size: {pos_fraction*100:.0f}%)\n"
+            f"📌 <b>Precio Entrada:</b> {entry:.6g}\n\n"
+            f"🎯 <b>TAKE PROFIT (TP):</b>\n"
+            f" ├ Precio: <b>{tp_price:.6g}</b> (+{tp:.2f}%)\n"
+            f" └ Ganancia Est.: <b>+${potential_win_usdt:.2f}</b>\n\n"
+            f"🛑 <b>STOP LOSS (SL):</b>\n"
+            f" ├ Precio: <b>{sl_price:.6g}</b> ({sl:.2f}%)\n"
+            f" └ Pérdida Est.: <b>-${potential_loss_usdt:.2f}</b>\n\n"
+            f"⚖️ <b>Breakeven (Cero Pérdida):</b> {breakeven_price:.6g}\n\n"
+            f"🧠 <b>ANÁLISIS DEL MOTOR:</b>\n"
+            f" ├ Régimen: {regime}\n"
+            f" ├ Edge Score: {edge_score:.1f}/10 ({edge_bucket})\n"
+            f" └ Risk Multiplier: x{risk_mult:.2f}\n"
+            f"⚙️ <b>Estrategias:</b>\n{strat_list}\n\n"
+            f"🆔 <code>{order_id}</code>"
         )
+        Reporter.send(msg, is_critical=True)
 
-    # ==========================================================
-    # PROTECTION
-    # ==========================================================
     @staticmethod
     def protection_activated(symbol, entry, current, sl_pct, sl_price, margin):
-
-        Reporter.send(
-            f"🛡️ <b>PROTECCIÓN ACTIVADA</b>\n\n"
-            f"{symbol}\n"
-            f"Entrada: {entry:.6f}\n"
-            f"Actual: <b>{current:.6f}</b>\n\n"
-            f"SL dinámico: <b>{sl_pct:+.2f}%</b>\n"
-            f"Precio SL: <b>{sl_price:.6f}</b>\n"
-            f"Margen hasta SL: {margin:.2f}%\n\n"
-            f"Capital asegurado",
-            is_critical=True
+        msg = (
+            f"🛡️ <b>PISO DE CRISTAL ACTIVADO | {symbol}</b>\n\n"
+            f"📈 <b>Precio Actual:</b> {current:.6g}\n"
+            f"🔒 <b>Nuevo Stop Loss:</b> {sl_price:.6g}\n"
+            f"💰 <b>Beneficio Asegurado:</b> {sl_pct:+.2f}%\n"
+            f"📏 <b>Margen de Respiro:</b> {margin:.2f}%\n\n"
+            f"<i>El capital está blindado. Este trade cerrará en verde.</i>"
         )
+        Reporter.send(msg, is_critical=True)
 
-    # ==========================================================
-    # TP EXTENSION
-    # ==========================================================
     @staticmethod
     def tp_extension(symbol, net, old_tp, new_tp, new_sl, extension_num, max_ext):
-        Reporter.send(
-            f"🔁 <b>EXTENSIÓN TP</b>\n\n"
-            f"{symbol}\n"
-            f"Neto actual: {net:+.2f}%\n"
-            f"TP anterior: {old_tp:.2f}%\n"
-            f"Nuevo TP: <b>{new_tp:.2f}%</b>\n"
-            f"SL actualizado: {new_sl:+.2f}%\n\n"
-            f"Extensión {extension_num}/{max_ext}"
+        msg = (
+            f"🔥 <b>TENDENCIA EXPRIMIDA | {symbol}</b>\n\n"
+            f"🚀 <b>Rendimiento Actual:</b> +{net:.2f}%\n"
+            f"🎯 <b>TP Extendido a:</b> +{new_tp:.2f}%\n"
+            f"🔒 <b>SL Actualizado a:</b> +{new_sl:.2f}%\n"
+            f"🔄 <b>Extensión:</b> {extension_num} de {max_ext}\n\n"
+            f"<i>Dejando correr las ganancias...</i>"
         )
+        Reporter.send(msg)
 
-    # ==========================================================
-    # EXIT
-    # ==========================================================
     @staticmethod
-    def exit(symbol, net, gross, pnl_usdt, reason, hold,
-             tp_reached, order_id, risk_mult, streak_w, streak_l):
+    def exit(symbol, net, gross, pnl_usdt, reason, hold, tp_reached, order_id, risk_mult, streak_w, streak_l):
+        is_win = net > 0
+        emoji = "✅" if is_win else "❌"
+        header = "GANANCIA" if is_win else "PÉRDIDA"
 
-        emoji = "🟢" if net > 0 else "🔴"
-
-        Reporter.send(
-            f"{emoji} <b>SALIDA</b>\n\n"
-            f"{symbol}\n"
-            f"Neto: <b>{net:+.2f}%</b>\n"
-            f"PnL: {pnl_usdt:+.2f} USDT\n"
-            f"Duración: {hold:.1f} min\n"
-            f"Motivo: {reason}\n\n"
-            f"Risk x{risk_mult:.2f}\n"
-            f"Racha: W{streak_w} / L{streak_l}",
-            is_critical=True
+        msg = (
+            f"{emoji} <b>TRADE CERRADO: {header} | {symbol}</b>\n\n"
+            f"💵 <b>PnL Neto (USDT):</b> {pnl_usdt:+.2f} USDT\n"
+            f"📊 <b>Rentabilidad:</b> {net:+.2f}%\n"
+            f"⏱️ <b>Duración:</b> {hold:.1f} min\n"
+            f"📋 <b>Motivo:</b> {reason}\n\n"
+            f"📈 <b>ESTADO DEL MOTOR:</b>\n"
+            f" ├ Racha Actual: W{streak_w} / L{streak_l}\n"
+            f" └ Nuevo Risk Mult: x{risk_mult:.2f}\n"
         )
+        Reporter.send(msg, is_critical=True)
 
-    # ==========================================================
-    # DAILY
-    # ==========================================================
     @staticmethod
     def daily(report):
-
         pnl_usdt = report.get("pnl_usdt", 0.0)
+        is_positive = report['pnl'] >= 0
+        emoji = "🎉" if is_positive else "📉"
 
-        Reporter.send(
-            f"📊 <b>REPORTE DIARIO</b> — {report['date']}\n\n"
-            f"Inicio: ${report['cap_start']:.2f}\n"
-            f"Final: <b>${report['cap_end']:.2f}</b>\n"
-            f"PNL: <b>{report['pnl']:+.2f}%</b> ({pnl_usdt:+.2f} USDT)\n\n"
-            f"Trades: {report['trades']} | "
-            f"✅ {report['wins']} | ❌ {report['losses']}\n"
-            f"Win Rate: {report['win_rate']:.1f}%\n\n"
-            f"BNB: {report['bnb']:.6f}\n"
-            f"Risk Mult: x{report['risk_mult']:.2f}\n"
-            f"Modo: {report['mode']}\n"
-            f"ML: {report['ml_status']}",
-            is_critical=True
+        msg = (
+            f"📊 <b>CIERRE DIARIO OMEGA Ω | {report['date']}</b>\n\n"
+            f"💰 <b>RESUMEN DE CAPITAL:</b>\n"
+            f" ├ Inicio: ${report['cap_start']:.2f}\n"
+            f" ├ Final: <b>${report['cap_end']:.2f}</b>\n"
+            f" └ <b>PnL del Día: {report['pnl']:+.2f}% ({pnl_usdt:+.2f} USDT)</b> {emoji}\n\n"
+            f"📈 <b>RENDIMIENTO OPERATIVO:</b>\n"
+            f" ├ Total Trades: {report['trades']}\n"
+            f" ├ Aciertos / Fallos: ✅ {report['wins']} | ❌ {report['losses']}\n"
+            f" └ Win Rate: {report['win_rate']:.1f}%\n\n"
+            f"⛽ <b>RESERVA DE GASOLINA (BNB):</b>\n"
+            f" ├ BNB Disponible: {report['bnb']:.6f}\n"
+            f" └ Días de Reserva: ~{report.get('fee_reserve_days', 5)}\n\n"
+            f"⚙️ <b>ESTADO DEL SISTEMA:</b>\n"
+            f" ├ Modo Actual: {report['mode']}\n"
+            f" ├ Risk Multiplier: x{report['risk_mult']:.2f}\n"
+            f" └ Cerebro ML: {report['ml_status']}\n"
         )
+        Reporter.send(msg, is_critical=True)
 
-    # ==========================================================
-    # EMERGENCY
-    # ==========================================================
     @staticmethod
     def emergency_stop(pnl, limit, scope="daily"):
-
-        scope_txt = "EQUITY" if scope == "equity" else "DÍA"
-
-        Reporter.send(
-            f"🚨 <b>DETENCIÓN DE EMERGENCIA</b>\n\n"
+        scope_txt = "EQUITY GLOBAL" if scope == "equity" else "DÍA ACTUAL"
+        msg = (
+            f"🚨 <b>DETENCIÓN DE EMERGENCIA</b> 🚨\n\n"
             f"Ámbito: {scope_txt}\n"
-            f"Drawdown: {pnl:.2f}%\n"
-            f"Límite: {limit:.2f}%\n\n"
-            f"Entradas congeladas\n"
-            f"Capital protegido",
-            is_critical=True
+            f"Caída Registrada (Drawdown): {pnl:.2f}%\n"
+            f"Límite Máximo Permitido: {limit:.2f}%\n\n"
+            f"⚠️ <i>Entradas congeladas. Capital protegido por protocolo de seguridad.</i>"
         )
+        Reporter.send(msg, is_critical=True)
 
-    # ==========================================================
-    # LOW BNB
-    # ==========================================================
     @staticmethod
     def low_bnb(bnb_balance, estimated_trades_left):
-        Reporter.send(
-            f"⛽ <b>GASOLINA BAJA</b>\n\n"
+        msg = (
+            f"⛽ <b>ALERTA: GASOLINA BAJA</b>\n\n"
             f"BNB disponible: {bnb_balance:.6f}\n"
-            f"Trades restantes aprox: {estimated_trades_left}",
-            is_critical=True
+            f"Trades restantes aprox: {estimated_trades_left}\n\n"
+            f"<i>Recomendación: Recargar BNB pronto para evitar pagar comisiones completas en USDT.</i>"
         )
+        Reporter.send(msg, is_critical=True)
 
-    # ==========================================================
-    # ML PHASE
-    # ==========================================================
     @staticmethod
     def ml_phase_change(phase, precision, trades_analyzed):
-        Reporter.send(
-            f"🧠 <b>ML EVOLUCIÓN</b>\n\n"
-            f"Fase: {phase}\n"
-            f"Trades analizados: {trades_analyzed}\n"
-            f"Precisión: {precision:.1f}%"
+        msg = (
+            f"🧠 <b>EVOLUCIÓN DEL CEREBRO ML</b>\n\n"
+            f"Fase Alcanzada: <b>{phase}</b>\n"
+            f"Trades Analizados: {trades_analyzed}\n"
+            f"Precisión Predictiva: {precision:.1f}%\n\n"
+            f"<i>El modelo HistGradientBoosting se ha calibrado con la nueva data.</i>"
         )
+        Reporter.send(msg)
 
-    # ==========================================================
-    # WARNING
-    # ==========================================================
     @staticmethod
     def warning(msg):
-        Reporter.send(f"⚠️ <b>ALERTA</b>\n\n{msg}", is_critical=True)
+        Reporter.send(f"⚠️ <b>ALERTA DEL SISTEMA:</b>\n\n{msg}", is_critical=True)
 
-    # ==========================================================
-    # NO TRADE
-    # ==========================================================
     @staticmethod
     def no_trade(symbol, reason, edge_score=None):
-
         critical = ["shock", "Daily DD", "emergency", "SURVIVAL"]
-
-        if not any(k.lower() in reason.lower() for k in critical):
-            return
-
+        if not any(k.lower() in reason.lower() for k in critical): return
+        
         now = time.time()
         last = Reporter._no_trade_last.get(symbol, {"t": 0})
-
-        if now - last["t"] < NO_TRADE_MIN_INTERVAL_SEC:
-            return
-
+        if now - last["t"] < NO_TRADE_MIN_INTERVAL_SEC: return
         Reporter._no_trade_last[symbol] = {"t": now}
 
-        Reporter.send(
-            f"⛔ <b>NO-TRADE CRÍTICO</b>\n\n"
-            f"{symbol}\n"
-            f"Razón: {reason}",
-            is_critical=True
+        msg = (
+            f"⛔ <b>ENTRADA RECHAZADA (SEGURIDAD) | {symbol}</b>\n\n"
+            f"Razón: {reason}\n"
+            f"Edge Score abortado: {edge_score:.1f}/10" if edge_score else f"Razón: {reason}"
         )
+        Reporter.send(msg, is_critical=True)
 
 
 
