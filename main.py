@@ -857,6 +857,11 @@ class OmegaEvolutionary:
 
             macd = float(df['trend_macd'].iloc[-1])
             ema_cross = bool(df['trend_ema_fast'].iloc[-1] > df['trend_ema_slow'].iloc[-1])
+            adx = float(df['trend_adx'].iloc[-1])
+
+            # Nuevas métricas dinámicas de volatilidad
+            df['atr'] = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14).average_true_range()
+            atr_pct = (df['atr'].iloc[-1] / df['close'].iloc[-1]) * 100
 
             k5m = self.client.get_klines(symbol=symbol, interval="5m", limit=20)
             c5 = [float(x[4]) for x in k5m]
@@ -873,20 +878,22 @@ class OmegaEvolutionary:
             chop = (abs(drift_30) < 0.20) and (vol_30 > 1.80)
 
             return {
-                'momentum': float(momentum),
-                'volatility': float(volatility),
-                'vol_spike': bool(vol_spike),
-                'rsi': float(rsi),
-                'macd': float(macd),
-                'ema_cross': bool(ema_cross),
-                'multi_tf': bool(multi_tf),
-                'closes': closes,
-                'candle_change': float(candle_change),
-                'candle_range': float(candle_range),
-                'drift_30': float(drift_30),
-                'vol_30': float(vol_30),
-                'chop': bool(chop)
-            }
+                            'momentum': float(momentum),
+                            'volatility': float(volatility),
+                            'vol_spike': bool(vol_spike),
+                            'rsi': float(rsi),
+                            'macd': float(macd),
+                            'ema_cross': bool(ema_cross),
+                            'multi_tf': bool(multi_tf),
+                            'closes': closes,
+                            'candle_change': float(candle_change),
+                            'candle_range': float(candle_range),
+                            'drift_30': float(drift_30),
+                            'vol_30': float(vol_30),
+                            'chop': bool(chop),
+                            'atr_pct': float(atr_pct),
+                            'adx': float(adx)
+                        }
         except Exception as e:
             ERROR_LOGGER.error(f"Error métricas {symbol}: {str(e)}")
             return None
@@ -902,7 +909,7 @@ class OmegaEvolutionary:
         macd = metrics['macd']
         ema_cross = metrics['ema_cross']
         multi_tf = metrics['multi_tf']
-
+        adx = metrics.get('adx', 0.0)
         if m > 1.0:
             s.append("Momentum Breakout")
         if 0.4 < m <= 1.0:
@@ -921,7 +928,8 @@ class OmegaEvolutionary:
             s.append("Multi-Timeframe Confirmation")
         if rsi > 80 and m < -0.7:
             s.append("Overbought Reversal Caution")
-
+        if adx > 25 and m > 0:
+            s.append("Trend Follower (ADX)")
         return list(set(s))
 
     def _calculate_strategy_score(self, strategies):
