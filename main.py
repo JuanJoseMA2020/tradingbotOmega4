@@ -996,17 +996,22 @@ class OmegaEvolutionary:
     # MARKET REGIME + BTC STATE (WINNER-GRADE)
     # ==========================================================
     def _get_market_regime(self):
-        try:
-            k = self.client.get_klines(symbol="BTCUSDT", interval="1h", limit=6)
-            closes = [float(x[4]) for x in k]
-            change = (closes[-1] / closes[0] - 1) * 100
-            if change > 2:
-                return "ALCISTA"
-            elif change < -2:
-                return "BAJISTA"
-            return "LATERAL"
-        except:
-            return "LATERAL"
+            try:
+                k = self.client.get_klines(symbol="BTCUSDT", interval="15m", limit=30)
+                df = pd.DataFrame(k, columns=['open_time', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'qav', 'num_trades', 'taker_base', 'taker_quote', 'ignore'])
+                df = df.astype(float)
+                df = add_all_ta_features(df, open="open", high="high", low="low", close="close", volume="volume", fillna=True)
+                
+                adx = float(df['trend_adx'].iloc[-1])
+                ema_fast = float(df['trend_ema_fast'].iloc[-1])
+                ema_slow = float(df['trend_ema_slow'].iloc[-1])
+                
+                if adx < 20.0:  # Por debajo de esto, el mercado es lateral puro (chop)
+                    return "LATERAL"
+                return "ALCISTA" if ema_fast > ema_slow else "BAJISTA"
+            except Exception as e:
+                ERROR_LOGGER.error(f"Error regime: {str(e)}")
+                return "LATERAL"
 
     def _btc_state(self):
         """
@@ -1191,33 +1196,25 @@ class OmegaEvolutionary:
     # NO-TRADE ZONES (hard vs soft)
     # ==========================================================
     def _no_trade_zone(self, sym, metrics, regime, edge_score, edge_bucket, btc_state):
-        if self.daily_entry_freeze or self.emergency_stop:
-            return True, "Daily DD freeze / emergency"
+            if self.daily_entry_freeze or self.emergency_stop:
+                return True, "Daily DD freeze / emergency"
 
-        if (time.time() - self.start_time) < WARMUP_MINUTES * 60:
-            return True, "Warm-up"
+            if (time.time() - self.start_time) < WARMUP_MINUTES * 60:
+                return True, "Warm-up"
 
-        if BTC_SHOCK_BLOCK and btc_state.get("shock", False):
-            return True, f"BTC shock (drift_5={btc_state['drift_5']:.2f}%, last={btc_state['last_change']:.2f}%)"
+            # Hard blocks reducidos al mínimo (Solo anomalías extremas)
+            if abs(metrics.get("candle_change", 0.0)) >= 3.5:
+                return True, f"Candle extreme ({metrics['candle_change']:.2f}%)"
+            if metrics.get("candle_range", 0.0) >= 4.0:
+                return True, f"Candle range extreme ({metrics['candle_range']:.2f}%)"
 
-        chop_score = float(btc_state.get("chop_score", 0.0))
-        if chop_score >= BTC_CHOP_SOFTBLOCK_SCORE and regime == "LATERAL":
-            if edge_score < BTC_CHOP_EDGE_OVERRIDE and edge_bucket in ["LOW", "MEDIUM"]:
-                return True, f"BTC chop (score={chop_score:.2f}, vol={btc_state['vol']:.2f})"
+            # Eliminamos el bloqueo duro por CHOP o LATERAL. Ahora lo gestionaremos
+            # reduciendo el tamaño de la posición (Soft-Scaling) en la Fase 4.
 
-        if abs(metrics.get("candle_change", 0.0)) >= 2.2:
-            return True, f"Candle extreme ({metrics['candle_change']:.2f}%)"
-        if metrics.get("candle_range", 0.0) >= 2.8:
-            return True, f"Candle range extreme ({metrics['candle_range']:.2f}%)"
+            if self.mode == "SURVIVAL" and regime == "BAJISTA":
+                return True, "SURVIVAL: mercado bajista"
 
-        if metrics.get("chop", False):
-            if edge_bucket != "HIGH":
-                return True, "Chop (alta vol sin dirección)"
-
-        if self.mode == "SURVIVAL" and regime == "BAJISTA":
-            return True, "SURVIVAL: mercado bajista"
-
-        return False, ""
+            return False, ""
 
     # ==========================================================
     # DAILY LIMITS + DD ADAPTATIVO
